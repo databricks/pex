@@ -441,8 +441,8 @@ class PEX(object):  # noqa: T000
 
   @staticmethod
   def execute_module(module_name):
-    import runpy
-    runpy.run_module(module_name, run_name='__main__')
+    from .hacked_runpy import run_module_with_sys_modules_override
+    run_module_with_sys_modules_override(module_name)
 
   @staticmethod
   def execute_pkg_resources(spec):
