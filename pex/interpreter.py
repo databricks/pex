@@ -87,6 +87,7 @@ class PythonIdentity(object):
 
   @classmethod
   def from_id_string(cls, id_string):
+    print 'id_string=%s' % id_string
     values = id_string.split()
     if len(values) != 4:
       raise cls.InvalidError("Invalid id string: %s" % id_string)
@@ -213,6 +214,7 @@ class PythonInterpreter(object):
 
   @classmethod
   def _parse_extras(cls, output_lines):
+    print 'output_lines=%s' % output_lines
     def iter_lines():
       for line in output_lines:
         try:
@@ -225,8 +227,12 @@ class PythonInterpreter(object):
   @classmethod
   def _from_binary_internal(cls, path_extras):
     def iter_extras():
+      print 'sys.path=%s' % sys.path
+      print list(path_extras)
       for item in sys.path + list(path_extras):
+        print 'item=%s' % item
         for dist in find_distributions(item):
+          print 'dist=%s' % dist
           if dist.version:
             yield ((dist.key, dist.version), dist.location)
     return cls(sys.executable, PythonIdentity.get(), dict(iter_extras()))
@@ -245,6 +251,8 @@ class PythonInterpreter(object):
     if len(output) == 0:
       raise cls.IdentificationError('Could not establish identity of %s' % binary)
     identity, extras = output[0], output[1:]
+    print 'identity=%s' % identity
+    print 'extras=%s' % extras
     return cls(
         binary,
         PythonIdentity.from_id_string(identity),
