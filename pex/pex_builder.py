@@ -361,6 +361,8 @@ class PEXBuilder(object):
         self._interpreter.get_location('setuptools'),
         name='setuptools')
     print "self._interpreter.extras=%s" % self._interpreter.extras
+    print "self._interpreter.get_location('setuptools')=%s" % self._interpreter.get_location('setuptools')
+    print os.listdir(self._interpreter.get_location('setuptools'))
     print 'setuptools=%s' % setuptools
     print 'setuptools.location=%s' % setuptools.location
     print 'setuptools.resource_listdir("/")=%s' % list(setuptools.resource_listdir('/'))
