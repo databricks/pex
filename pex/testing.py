@@ -1,22 +1,34 @@
 # Copyright 2014 Pants project contributors (see CONTRIBUTORS.md).
 # Licensed under the Apache License, Version 2.0 (see LICENSE).
+from __future__ import print_function
 
 import contextlib
 import os
 import random
+import subprocess
 import sys
 import tempfile
-import zipfile
+import traceback
 from collections import namedtuple
 from textwrap import dedent
 
 from .bin.pex import log, main
-from .common import safe_mkdir, safe_rmtree
-from .compatibility import nested
+from .common import open_zip, safe_mkdir, safe_rmtree
+from .compatibility import PY3, nested
 from .executor import Executor
 from .installer import EggInstaller, Packager
 from .pex_builder import PEXBuilder
 from .util import DistributionHelper, named_temporary_file
+from .version import SETUPTOOLS_REQUIREMENT
+
+IS_PYPY = "hasattr(sys, 'pypy_version_info')"
+NOT_CPYTHON27 = ("%s or (sys.version_info[0], sys.version_info[1]) != (2, 7)" % (IS_PYPY))
+NOT_CPYTHON36 = ("%s or (sys.version_info[0], sys.version_info[1]) != (3, 6)" % (IS_PYPY))
+IS_LINUX = "platform.system() == 'Linux'"
+IS_NOT_LINUX = "platform.system() != 'Linux'"
+NOT_CPYTHON27_OR_OSX = "%s or %s" % (NOT_CPYTHON27, IS_NOT_LINUX)
+NOT_CPYTHON27_OR_LINUX = "%s or %s" % (NOT_CPYTHON27, IS_LINUX)
+NOT_CPYTHON36_OR_LINUX = "%s or %s" % (NOT_CPYTHON36, IS_LINUX)
 
 
 @contextlib.contextmanager
@@ -46,6 +58,13 @@ def random_bytes(length):
       map(chr, (random.randint(ord('a'), ord('z')) for _ in range(length)))).encode('utf-8')
 
 
+def get_dep_dist_names_from_pex(pex_path, match_prefix=''):
+  """Given an on-disk pex, extract all of the unique first-level paths under `.deps`."""
+  with open_zip(pex_path) as pex_zip:
+    dep_gen = (f.split(os.sep)[1] for f in pex_zip.namelist() if f.startswith('.deps/'))
+    return set(item for item in dep_gen if item.startswith(match_prefix))
+
+
 @contextlib.contextmanager
 def temporary_content(content_map, interp=None, seed=31337):
   """Write content to disk where content is map from string => (int, string).
@@ -73,7 +92,7 @@ def yield_files(directory):
 
 
 def write_zipfile(directory, dest, reverse=False):
-  with contextlib.closing(zipfile.ZipFile(dest, 'w')) as zf:
+  with open_zip(dest, 'w') as zf:
     for filename, rel_filename in sorted(yield_files(directory), reverse=reverse):
       zf.write(filename, arcname=rel_filename)
   return dest
@@ -107,13 +126,13 @@ PROJECT_CONTENT = {
 
 @contextlib.contextmanager
 def make_installer(name='my_project', version='0.0.0', installer_impl=EggInstaller, zip_safe=True,
-                   install_reqs=None):
+                   install_reqs=None, **kwargs):
   interp = {'project_name': name,
             'version': version,
             'zip_safe': zip_safe,
             'install_requires': install_reqs or []}
   with temporary_content(PROJECT_CONTENT, interp=interp) as td:
-    yield installer_impl(td)
+    yield installer_impl(td, **kwargs)
 
 
 @contextlib.contextmanager
@@ -134,18 +153,19 @@ def make_sdist(name='my_project', version='0.0.0', zip_safe=True, install_reqs=N
 
 @contextlib.contextmanager
 def make_bdist(name='my_project', version='0.0.0', installer_impl=EggInstaller, zipped=False,
-               zip_safe=True):
+               zip_safe=True, **kwargs):
   with make_installer(name=name,
                       version=version,
                       installer_impl=installer_impl,
-                      zip_safe=zip_safe) as installer:
+                      zip_safe=zip_safe,
+                      **kwargs) as installer:
     dist_location = installer.bdist()
     if zipped:
       yield DistributionHelper.distribution_from_path(dist_location)
     else:
       with temporary_dir() as td:
         extract_path = os.path.join(td, os.path.basename(dist_location))
-        with contextlib.closing(zipfile.ZipFile(dist_location)) as zf:
+        with open_zip(dist_location) as zf:
           zf.extractall(extract_path)
         yield DistributionHelper.distribution_from_path(extract_path)
 
@@ -196,11 +216,16 @@ def write_simple_pex(td, exe_contents, dists=None, sources=None, coverage=False)
   return pb
 
 
-class IntegResults(namedtuple('results', 'output return_code exception')):
+class IntegResults(namedtuple('results', 'output return_code exception traceback')):
   """Convenience object to return integration run results."""
 
   def assert_success(self):
-    assert self.exception is None and self.return_code is None
+    if not (self.exception is None and self.return_code in [None, 0]):
+      raise AssertionError(
+        'integration test failed: return_code=%s, exception=%r, output=%s, traceback=%s' % (
+          self.return_code, self.exception, self.output, self.traceback
+        )
+      )
 
   def assert_failure(self):
     assert self.exception or self.return_code
@@ -213,6 +238,7 @@ def run_pex_command(args, env=None):
   than running a generated pex.  This is useful for testing end to end runs
   with specific command line arguments or env options.
   """
+  args.insert(0, '-vvvvv')
   def logger_callback(_output):
     def mock_logger(msg, v=None):
       _output.append(msg)
@@ -220,22 +246,27 @@ def run_pex_command(args, env=None):
     return mock_logger
 
   exception = None
+  tb = None
   error_code = None
   output = []
   log.set_logger(logger_callback(output))
+
   try:
     main(args=args)
   except SystemExit as e:
     error_code = e.code
   except Exception as e:
     exception = e
-  return IntegResults(output, error_code, exception)
+    tb = traceback.format_exc()
+
+  return IntegResults(output, error_code, exception, tb)
 
 
 # TODO(wickman) Why not PEX.run?
 def run_simple_pex(pex, args=(), env=None, stdin=None):
   process = Executor.open_process([sys.executable, pex] + list(args), env=env, combined=True)
   stdout, _ = process.communicate(input=stdin)
+  print(stdout.decode('utf-8') if PY3 else stdout)
   return stdout.replace(b'\r', b''), process.returncode
 
 
@@ -271,3 +302,42 @@ def combine_pex_coverage(coverage_file_iter):
 
   combined.write()
   return combined.filename
+
+
+def bootstrap_python_installer(dest):
+  safe_rmtree(dest)
+  for _ in range(3):
+    try:
+      subprocess.check_call(
+        ['git', 'clone', 'https://github.com/pyenv/pyenv.git', dest]
+      )
+    except subprocess.CalledProcessError as e:
+      print('caught exception: %r' % e)
+      continue
+    else:
+      break
+  else:
+    raise RuntimeError("Helper method could not clone pyenv from git after 3 tries")
+
+
+def ensure_python_distribution(version):
+  pyenv_root = os.path.join(os.getcwd(), '.pyenv_test')
+  interpreter_location = os.path.join(pyenv_root, 'versions', version)
+  pyenv = os.path.join(pyenv_root, 'bin', 'pyenv')
+  pip = os.path.join(interpreter_location, 'bin', 'pip')
+
+  if not os.path.exists(pyenv):
+    bootstrap_python_installer(pyenv_root)
+
+  if not os.path.exists(interpreter_location):
+    os.environ['PYENV_ROOT'] = pyenv_root
+    subprocess.check_call([pyenv, 'install', '--keep', version])
+    subprocess.check_call([pip, 'install', SETUPTOOLS_REQUIREMENT])
+
+  python = os.path.join(interpreter_location, 'bin', 'python' + version[0:3])
+  return python, pip
+
+
+def ensure_python_interpreter(version):
+  python, _ = ensure_python_distribution(version)
+  return python

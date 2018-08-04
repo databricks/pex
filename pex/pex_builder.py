@@ -1,7 +1,7 @@
 # Copyright 2014 Pants project contributors (see CONTRIBUTORS.md).
 # Licensed under the Apache License, Version 2.0 (see LICENSE).
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function
 
 import logging
 import os
@@ -15,7 +15,6 @@ from .finders import get_entry_point_from_console_script, get_script_from_distri
 from .interpreter import PythonInterpreter
 from .pex_info import PexInfo
 from .util import CacheHelper, DistributionHelper
-
 
 BOOTSTRAP_ENVIRONMENT = b"""
 import os
@@ -76,7 +75,6 @@ class PEXBuilder(object):
       interpreter exit.
     """
     self._chroot = chroot or Chroot(path or safe_mkdtemp())
-    self._pex_info = pex_info or PexInfo.default()
     self._frozen = False
     self._interpreter = interpreter or PythonInterpreter.get()
     self._shebang = self._interpreter.identity.hashbang()
@@ -84,6 +82,7 @@ class PEXBuilder(object):
     self._preamble = to_bytes(preamble or '')
     self._copy = copy
     self._distributions = set()
+    self._pex_info = pex_info or PexInfo.default(interpreter)
 
   def _ensure_unfrozen(self, name='Operation'):
     if self._frozen:
@@ -166,6 +165,15 @@ class PEXBuilder(object):
     self._ensure_unfrozen('Adding a requirement')
     self._pex_info.add_requirement(req)
 
+  def add_interpreter_constraint(self, ic):
+    """Add an interpreter constraint to the PEX environment.
+
+    :param ic: A version constraint on the interpreter used to build and run this PEX environment.
+
+    """
+    self._ensure_unfrozen('Adding an interpreter constraint')
+    self._pex_info.add_interpreter_constraint(ic)
+
   def set_executable(self, filename, env_filename=None):
     """Set the executable for this environment.
 
@@ -186,7 +194,7 @@ class PEXBuilder(object):
           "Setting executable on a PEXBuilder that already has one!")
     self._copy_or_link(filename, env_filename, "executable")
     entry_point = env_filename
-    entry_point.replace(os.path.sep, '.')
+    entry_point = entry_point.replace(os.path.sep, '.')
     self._pex_info.entry_point = entry_point.rpartition('.')[0]
 
   def set_script(self, script):
@@ -253,7 +261,41 @@ class PEXBuilder(object):
         self._copy_or_link(filename, target)
     return CacheHelper.dir_hash(path)
 
+  def _get_installer_paths(self, base):
+    """Set up an overrides dict for WheelFile.install that installs the contents
+    of a wheel into its own base in the pex dependencies cache.
+    """
+    return {
+      'purelib': base,
+      'headers': os.path.join(base, 'headers'),
+      'scripts': os.path.join(base, 'bin'),
+      'platlib': base,
+      'data': base
+    }
+
   def _add_dist_zip(self, path, dist_name):
+    # We need to distinguish between wheels and other zips. Most of the time,
+    # when we have a zip, it contains its contents in an importable form.
+    # But wheels don't have to be importable, so we need to force them
+    # into an importable shape. We can do that by installing it into its own
+    # wheel dir.
+    if dist_name.endswith("whl"):
+      from wheel.install import WheelFile
+      tmp = safe_mkdtemp()
+      whltmp = os.path.join(tmp, dist_name)
+      os.mkdir(whltmp)
+      wf = WheelFile(path)
+      wf.install(overrides=self._get_installer_paths(whltmp), force=True)
+      for (root, _, files) in os.walk(whltmp):
+        pruned_dir = os.path.relpath(root, tmp)
+        for f in files:
+          fullpath = os.path.join(root, f)
+          if os.path.isdir(fullpath):
+            continue
+          target = os.path.join(self._pex_info.internal_cache, pruned_dir, f)
+          self._chroot.copy(fullpath, target)
+      return CacheHelper.dir_hash(whltmp)
+
     with open_zip(path) as zf:
       for name in zf.namelist():
         if name.endswith('/'):
@@ -337,7 +379,8 @@ class PEXBuilder(object):
       self._chroot.touch(compiled, label='bytecode')
 
   def _prepare_manifest(self):
-    self._chroot.write(self._pex_info.dump().encode('utf-8'), PexInfo.PATH, label='manifest')
+    self._chroot.write(self._pex_info.dump(sort_keys=True).encode('utf-8'),
+                       PexInfo.PATH, label='manifest')
 
   def _prepare_main(self):
     self._chroot.write(self._preamble + b'\n' + BOOTSTRAP_ENVIRONMENT,
@@ -360,12 +403,17 @@ class PEXBuilder(object):
     # self-contained.
 
     wrote_setuptools = False
-    setuptools = DistributionHelper.distribution_from_path(
-        self._interpreter.get_location('setuptools'),
-        name='setuptools')
+    setuptools_location = self._interpreter.get_location('setuptools')
+    if setuptools_location is None:
+      raise RuntimeError(
+        'Failed to find setuptools via %s while building pex!' % self._interpreter.binary
+      )
 
+    setuptools = DistributionHelper.distribution_from_path(setuptools_location, name='setuptools')
     if setuptools is None:
-      raise RuntimeError('Failed to find setuptools while building pex!')
+      raise RuntimeError(
+        'Failed to find setuptools via %s while building pex!' % self._interpreter.binary
+      )
 
     for fn, content_stream in DistributionHelper.walk_data(setuptools):
       if fn.startswith('pkg_resources') or fn.startswith('_markerlib'):

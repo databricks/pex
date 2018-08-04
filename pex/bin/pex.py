@@ -23,14 +23,16 @@ from pex.fetcher import Fetcher, PyPIFetcher
 from pex.http import Context
 from pex.installer import EggInstaller
 from pex.interpreter import PythonInterpreter
+from pex.interpreter_constraints import validate_constraints
 from pex.iterator import Iterator
 from pex.package import EggPackage, SourcePackage
 from pex.pex import PEX
+from pex.pex_bootstrapper import find_compatible_interpreters
 from pex.pex_builder import PEXBuilder
 from pex.platforms import Platform
 from pex.requirements import requirements_from_file
 from pex.resolvable import Resolvable
-from pex.resolver import CachingResolver, Resolver, Unsatisfiable
+from pex.resolver import Unsatisfiable, resolve_multi
 from pex.resolver_options import ResolverOptionsBuilder
 from pex.tracer import TRACER
 from pex.variables import ENV, Variables
@@ -122,6 +124,12 @@ def process_precedence(option, option_str, option_value, parser, builder):
   elif option_str in ('--no-wheel', '--no-use-wheel'):
     setattr(parser.values, option.dest, False)
     builder.no_use_wheel()
+  elif option_str == '--manylinux':
+    setattr(parser.values, option.dest, True)
+    builder.use_manylinux()
+  elif option_str in ('--no-manylinux', '--no-use-manylinux'):
+    setattr(parser.values, option.dest, False)
+    builder.no_use_manylinux()
   else:
     raise OptionValueError
 
@@ -150,6 +158,13 @@ def configure_clp_pex_resolution(parser, builder):
       help='Whether to use pypi to resolve dependencies; Default: use pypi')
 
   group.add_option(
+    '--pex-path',
+    dest='pex_path',
+    type=str,
+    default=None,
+    help='A colon separated list of other pex files to merge into the runtime environment.')
+
+  group.add_option(
       '-f', '--find-links', '--repo',
       metavar='PATH/URL',
       action='callback',
@@ -172,12 +187,12 @@ def configure_clp_pex_resolution(parser, builder):
   group.add_option(
     '--pre', '--no-pre',
     dest='allow_prereleases',
-    default=False,
+    default=None,
     action='callback',
     callback=process_prereleases,
     callback_args=(builder,),
     help='Whether to include pre-release and development versions of requirements; '
-         'Default: only stable versions are used')
+         'Default: only stable versions are used, unless explicitly requested')
 
   group.add_option(
       '--disable-cache',
@@ -197,7 +212,7 @@ def configure_clp_pex_resolution(parser, builder):
       '--cache-ttl',
       dest='cache_ttl',
       type=int,
-      default=None,
+      default=3600,
       help='The cache TTL to use for inexact requirement specifications.')
 
   group.add_option(
@@ -215,6 +230,16 @@ def configure_clp_pex_resolution(parser, builder):
       callback=process_precedence,
       callback_args=(builder,),
       help='Whether to allow building of distributions from source; Default: allow builds')
+
+  group.add_option(
+      '--manylinux', '--no-manylinux', '--no-use-manylinux',
+      dest='use_manylinux',
+      default=True,
+      action='callback',
+      callback=process_precedence,
+      callback_args=(builder,),
+      help=('Whether to allow resolution of manylinux dists for linux target '
+            'platforms; Default: allow manylinux'))
 
   # Set the pex tool to fetch from PyPI by default if nothing is specified.
   parser.set_default('repos', [PyPIFetcher()])
@@ -257,9 +282,14 @@ def configure_clp_pex_options(parser):
   group.add_option(
       '--inherit-path',
       dest='inherit_path',
-      default=False,
-      action='store_true',
+      default='false',
+      action='store',
+      choices=['false', 'fallback', 'prefer'],
       help='Inherit the contents of sys.path (including site-packages) running the pex. '
+           'Possible values: false (does not inherit sys.path), '
+           'fallback (inherits sys.path after packaged dependencies), '
+           'prefer (inherits sys.path before packaged dependencies), '
+           'No value (alias for prefer, for backwards compatibility). '
            '[Default: %default]')
 
   parser.add_option_group(group)
@@ -274,10 +304,31 @@ def configure_clp_pex_environment(parser):
   group.add_option(
       '--python',
       dest='python',
-      default=None,
+      default=[],
+      type='str',
+      action='append',
       help='The Python interpreter to use to build the pex.  Either specify an explicit '
-           'path to an interpreter, or specify a binary accessible on $PATH. '
+           'path to an interpreter, or specify a binary accessible on $PATH. This option '
+           'can be passed multiple times to create a multi-interpreter compatible pex. '
            'Default: Use current interpreter.')
+
+  group.add_option(
+    '--interpreter-constraint',
+    dest='interpreter_constraint',
+    default=[],
+    type='str',
+    action='append',
+    help='A constraint that determines the interpreter compatibility for '
+         'this pex, using the Requirement-style format, e.g. "CPython>=3", or ">=2.7" '
+         'for requirements agnostic to interpreter class. This option can be passed multiple '
+         'times.')
+
+  group.add_option(
+    '--rcfile',
+    dest='rc_file',
+    default=None,
+    help='An additional path to a pexrc file to read during configuration parsing. '
+         'Used primarily for testing.')
 
   group.add_option(
       '--python-shebang',
@@ -289,16 +340,25 @@ def configure_clp_pex_environment(parser):
 
   group.add_option(
       '--platform',
-      dest='platform',
-      default=Platform.current(),
-      help='The platform for which to build the PEX.  Default: %default')
+      dest='platforms',
+      default=[],
+      type=str,
+      action='append',
+      help='The platform for which to build the PEX. This option can be passed multiple times '
+           'to create a multi-platform pex. To use wheels for specific interpreter/platform tags'
+           ', you can append them to the platform with hyphens like: PLATFORM-IMPL-PYVER-ABI '
+           '(e.g. "linux_x86_64-cp-27-cp27mu", "macosx_10.12_x86_64-cp-36-cp36m") PLATFORM is '
+           'the host platform e.g. "linux-x86_64", "macosx-10.12-x86_64", etc". IMPL is the '
+           'python implementation abbreviation (e.g. "cp", "pp", "jp"). PYVER is a two-digit '
+           'string representing the python version (e.g. "27", "36"). ABI is the ABI tag '
+           '(e.g. "cp36m", "cp27mu", "abi3", "none"). Default: current platform.')
 
   group.add_option(
       '--interpreter-cache-dir',
       dest='interpreter_cache_dir',
       default='{pex_root}/interpreters',
       help='The interpreter cache to use for keeping track of interpreter dependencies '
-           'for the pex tool. [Default: ~/.pex/interpreters]')
+           'for the pex tool. Default: `~/.pex/interpreters`.')
 
   parser.add_option_group(group)
 
@@ -326,6 +386,15 @@ def configure_clp_pex_entry_points(parser):
       help='Set the entry point as to the script or console_script as defined by a any of the '
            'distributions in the pex.  For example: "pex -c fab fabric" or "pex -c mturk boto".')
 
+  group.add_option(
+      '--validate-entry-point',
+      dest='validate_ep',
+      default=False,
+      action='store_true',
+      help='Validate the entry point by importing it in separate process. Warning: this could have '
+           'side effects. For example, entry point `a.b.c:m` will translate to '
+           '`from a.b.c import m` during validation. [Default: %default]')
+
   parser.add_option_group(group)
 
 
@@ -348,6 +417,34 @@ def configure_clp():
       default=None,
       help='The name of the generated .pex file: Omiting this will run PEX '
            'immediately and not save it to a file.')
+
+  parser.add_option(
+      '-p', '--preamble-file',
+      dest='preamble_file',
+      metavar='FILE',
+      default=None,
+      type=str,
+      help='The name of a file to be included as the preamble for the generated .pex file')
+
+  parser.add_option(
+      '-D', '--sources-directory',
+      dest='sources_directory',
+      metavar='DIR',
+      default=[],
+      type=str,
+      action='append',
+      help='Add sources directory to be packaged into the generated .pex file.'
+           '  This option can be used multiple times.')
+
+  parser.add_option(
+      '-R', '--resources-directory',
+      dest='resources_directory',
+      metavar='DIR',
+      default=[],
+      type=str,
+      action='append',
+      help='Add resources directory to be packaged into the generated .pex file.'
+           '  This option can be used multiple times.')
 
   parser.add_option(
       '-r', '--requirement',
@@ -460,46 +557,88 @@ def resolve_interpreter(cache, fetchers, interpreter, requirement):
     return interpreter.with_extra(egg.name, egg.raw_version, egg.path)
 
 
-def interpreter_from_options(options):
+def get_interpreter(python_interpreter, interpreter_cache_dir, repos, use_wheel):
   interpreter = None
 
-  if options.python:
-    if os.path.exists(options.python):
-      interpreter = PythonInterpreter.from_binary(options.python)
+  if python_interpreter:
+    if os.path.exists(python_interpreter):
+      interpreter = PythonInterpreter.from_binary(python_interpreter)
     else:
-      interpreter = PythonInterpreter.from_env(options.python)
+      interpreter = PythonInterpreter.from_env(python_interpreter)
     if interpreter is None:
-      die('Failed to find interpreter: %s' % options.python)
+      die('Failed to find interpreter: %s' % python_interpreter)
   else:
     interpreter = PythonInterpreter.get()
 
   with TRACER.timed('Setting up interpreter %s' % interpreter.binary, V=2):
-    resolve = functools.partial(resolve_interpreter, options.interpreter_cache_dir, options.repos)
+    resolve = functools.partial(resolve_interpreter, interpreter_cache_dir, repos)
 
     # resolve setuptools
     interpreter = resolve(interpreter, SETUPTOOLS_REQUIREMENT)
 
     # possibly resolve wheel
-    if interpreter and options.use_wheel:
+    if interpreter and use_wheel:
       interpreter = resolve(interpreter, WHEEL_REQUIREMENT)
 
     return interpreter
 
 
 def build_pex(args, options, resolver_option_builder):
-  with TRACER.timed('Resolving interpreter', V=2):
-    interpreter = interpreter_from_options(options)
+  with TRACER.timed('Resolving interpreters', V=2):
+    interpreters = [
+      get_interpreter(interpreter,
+                      options.interpreter_cache_dir,
+                      options.repos,
+                      options.use_wheel)
+      for interpreter in options.python or [None]
+    ]
 
-  if interpreter is None:
+  if options.interpreter_constraint:
+    # NB: options.python and interpreter constraints cannot be used together, so this will not
+    # affect usages of the interpreter(s) specified by the "--python" command line flag.
+    constraints = options.interpreter_constraint
+    validate_constraints(constraints)
+    rc_variables = Variables.from_rc(rc=options.rc_file)
+    pex_python_path = rc_variables.get('PEX_PYTHON_PATH', '')
+    interpreters = find_compatible_interpreters(pex_python_path, constraints)
+
+  if not interpreters:
     die('Could not find compatible interpreter', CANNOT_SETUP_INTERPRETER)
 
-  pex_builder = PEXBuilder(path=safe_mkdtemp(), interpreter=interpreter)
+  try:
+    with open(options.preamble_file) as preamble_fd:
+      preamble = preamble_fd.read()
+  except TypeError:
+    # options.preamble_file is None
+    preamble = None
+
+  interpreter = min(interpreters)
+
+  pex_builder = PEXBuilder(path=safe_mkdtemp(), interpreter=interpreter, preamble=preamble)
+
+  def walk_and_do(fn, src_dir):
+    src_dir = os.path.normpath(src_dir)
+    for root, dirs, files in os.walk(src_dir):
+      for f in files:
+        src_file_path = os.path.join(root, f)
+        dst_path = os.path.relpath(src_file_path, src_dir)
+        fn(src_file_path, dst_path)
+
+  for directory in options.sources_directory:
+    walk_and_do(pex_builder.add_source, directory)
+
+  for directory in options.resources_directory:
+    walk_and_do(pex_builder.add_resource, directory)
 
   pex_info = pex_builder.info
   pex_info.zip_safe = options.zip_safe
+  pex_info.pex_path = options.pex_path
   pex_info.always_write_cache = options.always_write_cache
   pex_info.ignore_errors = options.ignore_errors
   pex_info.inherit_path = options.inherit_path
+  if options.interpreter_constraint:
+    for ic in options.interpreter_constraint:
+      pex_builder.add_interpreter_constraint(ic)
 
   resolvables = [Resolvable.get(arg, resolver_option_builder) for arg in args]
 
@@ -515,23 +654,22 @@ def build_pex(args, options, resolver_option_builder):
       constraints.append(r)
     resolvables.extend(constraints)
 
-  resolver_kwargs = dict(interpreter=interpreter, platform=options.platform)
-
-  if options.cache_dir:
-    resolver = CachingResolver(options.cache_dir, options.cache_ttl, **resolver_kwargs)
-  else:
-    resolver = Resolver(**resolver_kwargs)
-
   with TRACER.timed('Resolving distributions'):
     try:
-      resolveds = resolver.resolve(resolvables)
+      resolveds = resolve_multi(resolvables,
+                                interpreters=interpreters,
+                                platforms=options.platforms,
+                                cache=options.cache_dir,
+                                cache_ttl=options.cache_ttl,
+                                allow_prereleases=resolver_option_builder.prereleases_allowed,
+                                use_manylinux=options.use_manylinux)
+
+      for dist in resolveds:
+        log('  %s' % dist, v=options.verbosity)
+        pex_builder.add_distribution(dist)
+        pex_builder.add_requirement(dist.as_requirement())
     except Unsatisfiable as e:
       die(e)
-
-  for dist in resolveds:
-    log('  %s' % dist, v=options.verbosity)
-    pex_builder.add_distribution(dist)
-    pex_builder.add_requirement(dist.as_requirement())
 
   if options.entry_point and options.script:
     die('Must specify at most one entry point or script.', INVALID_OPTIONS)
@@ -552,8 +690,26 @@ def make_relative_to_root(path):
   return os.path.normpath(path.format(pex_root=ENV.PEX_ROOT))
 
 
+def transform_legacy_arg(arg):
+  # inherit-path used to be a boolean arg (so either was absent, or --inherit-path)
+  # Now it takes a string argument, so --inherit-path is invalid.
+  # Fix up the args we're about to parse to preserve backwards compatibility.
+  if arg == '--inherit-path':
+    return '--inherit-path=prefer'
+  return arg
+
+
+def _compatible_with_current_platform(platforms):
+  return (
+    not platforms or
+    'current' in platforms or
+    str(Platform.current()) in platforms
+  )
+
+
 def main(args=None):
-  args = args or sys.argv[1:]
+  args = args[:] if args else sys.argv[1:]
+  args = [transform_legacy_arg(arg) for arg in args]
   parser, resolver_options_builder = configure_clp()
 
   try:
@@ -563,6 +719,9 @@ def main(args=None):
     args, cmdline = args, []
 
   options, reqs = parser.parse_args(args=args)
+  if options.python and options.interpreter_constraint:
+    die('The "--python" and "--interpreter-constraint" options cannot be used together.')
+
   if options.pex_root:
     ENV.set('PEX_ROOT', options.pex_root)
   else:
@@ -577,22 +736,24 @@ def main(args=None):
     with TRACER.timed('Building pex'):
       pex_builder = build_pex(reqs, options, resolver_options_builder)
 
+    pex_builder.freeze()
+    pex = PEX(pex_builder.path(),
+              interpreter=pex_builder.interpreter,
+              verify_entry_point=options.validate_ep)
+
     if options.pex_name is not None:
       log('Saving PEX file to %s' % options.pex_name, v=options.verbosity)
       tmp_name = options.pex_name + '~'
       safe_delete(tmp_name)
       pex_builder.build(tmp_name)
       os.rename(tmp_name, options.pex_name)
-      return 0
+    else:
+      if not _compatible_with_current_platform(options.platforms):
+        log('WARNING: attempting to run PEX with incompatible platforms!')
 
-    if options.platform != Platform.current():
-      log('WARNING: attempting to run PEX with differing platform!')
-
-    pex_builder.freeze()
-
-    log('Running PEX file at %s with args %s' % (pex_builder.path(), cmdline), v=options.verbosity)
-    pex = PEX(pex_builder.path(), interpreter=pex_builder.interpreter)
-    sys.exit(pex.run(args=list(cmdline)))
+      log('Running PEX file at %s with args %s' % (pex_builder.path(), cmdline),
+          v=options.verbosity)
+      sys.exit(pex.run(args=list(cmdline)))
 
 
 if __name__ == '__main__':

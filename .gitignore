@@ -1,6 +1,7 @@
 *~
 *.pyc
 *.egg-info
+/.cache
 /venv
 /build/*
 /dist/*
@@ -9,3 +10,7 @@
 /.idea
 /.coverage*
 /htmlcov
+/.pyenv_test
+.cache/*
+.eggs/*
+/.pytest_cache

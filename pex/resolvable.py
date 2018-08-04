@@ -8,8 +8,8 @@ from abc import abstractmethod, abstractproperty
 from pkg_resources import Requirement, safe_extra
 
 from .base import maybe_requirement, requirement_is_exact
-from .compatibility import string as compatibility_string
 from .compatibility import AbstractClass
+from .compatibility import string as compatibility_string
 from .installer import InstallerBase, Packager
 from .package import Package
 from .resolver_options import ResolverOptionsBuilder, ResolverOptionsInterface
@@ -150,7 +150,7 @@ class ResolvableRepository(Resolvable):
 
   @property
   def name(self):
-    raise NotImplemented
+    raise NotImplementedError
 
   @property
   def exact(self):

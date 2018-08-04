@@ -40,12 +40,12 @@ setup(
     'Operating System :: MacOS :: MacOS X',
     'Programming Language :: Python',
     'Programming Language :: Python :: 2',
-    'Programming Language :: Python :: 2.6',
     'Programming Language :: Python :: 2.7',
     'Programming Language :: Python :: 3',
     'Programming Language :: Python :: 3.3',
     'Programming Language :: Python :: 3.4',
     'Programming Language :: Python :: 3.5',
+    'Programming Language :: Python :: 3.6',
   ],
   packages = [
     'pex',
@@ -54,7 +54,16 @@ setup(
   ],
   install_requires = [
     SETUPTOOLS_REQUIREMENT,
+    WHEEL_REQUIREMENT,
   ],
+  extras_require={
+    # For improved subprocess robustness under python2.7.
+    'subprocess': ['subprocess32>=3.2.7'],
+    # For improved requirement resolution and fetching robustness.
+    'requests': ['requests>=2.8.14'],
+    # For improved requirement resolution and fetching performance.
+    'cachecontrol': ['CacheControl>=0.12.3'],
+  },
   tests_require = [
     'mock',
     'twitter.common.contextutil>=0.3.1,<0.4.0',

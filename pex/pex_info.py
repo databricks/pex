@@ -9,9 +9,10 @@ import warnings
 from collections import namedtuple
 
 from .common import open_zip
-from .compatibility import string as compatibility_string
 from .compatibility import PY2
+from .compatibility import string as compatibility_string
 from .orderedset import OrderedSet
+from .util import merge_split
 from .variables import ENV
 
 PexPlatform = namedtuple('PexPlatform', 'interpreter version strict')
@@ -23,23 +24,23 @@ class PexInfo(object):
   """PEX metadata.
 
   # Build metadata:
-  build_properties: BuildProperties # (key-value information about the build system)
-  code_hash: str                    # sha1 hash of all names/code in the archive
-  distributions: {dist_name: str}   # map from distribution name (i.e. path in
-                                    # the internal cache) to its cache key (sha1)
-  requirements: list                # list of requirements for this environment
+  build_properties: BuildProperties  # (key-value information about the build system)
+  code_hash: str                     # sha1 hash of all names/code in the archive
+  distributions: {dist_name: str}    # map from distribution name (i.e. path in
+                                     # the internal cache) to its cache key (sha1)
+  requirements: list                 # list of requirements for this environment
 
   # Environment options
-  pex_root: string                   # root of all pex-related files eg: ~/.pex
-  entry_point: string                # entry point into this pex
-  script: string                     # script to execute in this pex environment
-                                     # at most one of script/entry_point can be specified
-  zip_safe: True, default False      # is this pex zip safe?
-  inherit_path: True, default False  # should this pex inherit site-packages + PYTHONPATH?
-  ignore_errors: True, default False # should we ignore inability to resolve dependencies?
-  always_write_cache: False          # should we always write the internal cache to disk first?
-                                     # this is useful if you have very large dependencies that
-                                     # do not fit in RAM constrained environments
+  pex_root: string                    # root of all pex-related files eg: ~/.pex
+  entry_point: string                 # entry point into this pex
+  script: string                      # script to execute in this pex environment
+                                      # at most one of script/entry_point can be specified
+  zip_safe: True, default False       # is this pex zip safe?
+  inherit_path: false/fallback/prefer # should this pex inherit site-packages + PYTHONPATH?
+  ignore_errors: True, default False  # should we ignore inability to resolve dependencies?
+  always_write_cache: False           # should we always write the internal cache to disk first?
+                                      # this is useful if you have very large dependencies that
+                                      # do not fit in RAM constrained environments
 
   .. versionchanged:: 0.8
     Removed the ``repositories`` and ``indices`` information, as they were never
@@ -50,11 +51,11 @@ class PexInfo(object):
   INTERNAL_CACHE = '.deps'
 
   @classmethod
-  def make_build_properties(cls):
+  def make_build_properties(cls, interpreter=None):
     from .interpreter import PythonInterpreter
     from pkg_resources import get_platform
 
-    pi = PythonInterpreter.get()
+    pi = interpreter or PythonInterpreter.get()
     return {
       'class': pi.identity.interpreter,
       'version': pi.identity.version,
@@ -62,11 +63,11 @@ class PexInfo(object):
     }
 
   @classmethod
-  def default(cls):
+  def default(cls, interpreter=None):
     pex_info = {
       'requirements': [],
       'distributions': {},
-      'build_properties': cls.make_build_properties(),
+      'build_properties': cls.make_build_properties(interpreter),
     }
     return cls(info=pex_info)
 
@@ -121,7 +122,11 @@ class PexInfo(object):
       raise ValueError('PexInfo can only be seeded with a dict, got: '
                        '%s of type %s' % (info, type(info)))
     self._pex_info = info or {}
+    if 'inherit_path' in self._pex_info:
+      self.inherit_path = self._pex_info['inherit_path']
     self._distributions = self._pex_info.get('distributions', {})
+    # cast as set because pex info from json must store interpreter_constraints as a list
+    self._interpreter_constraints = set(self._pex_info.get('interpreter_constraints', set()))
     requirements = self._pex_info.get('requirements', [])
     if not isinstance(requirements, (list, tuple)):
       raise ValueError('Expected requirements to be a list, got %s' % type(requirements))
@@ -166,20 +171,51 @@ class PexInfo(object):
     self._pex_info['zip_safe'] = bool(value)
 
   @property
+  def pex_path(self):
+    """A colon separated list of other pex files to merge into the runtime environment.
+
+    This pex info property is used to persist the PEX_PATH environment variable into the pex info
+    metadata for reuse within a built pex.
+    """
+    return self._pex_info.get('pex_path')
+
+  @pex_path.setter
+  def pex_path(self, value):
+    self._pex_info['pex_path'] = value
+
+  @property
   def inherit_path(self):
     """Whether or not this PEX should be allowed to inherit system dependencies.
 
     By default, PEX environments are scrubbed of all system distributions prior to execution.
     This means that PEX files cannot rely upon preexisting system libraries.
 
-    By default inherit_path is False.  This may be overridden at runtime by the $PEX_INHERIT_PATH
+    By default inherit_path is false.  This may be overridden at runtime by the $PEX_INHERIT_PATH
     environment variable.
     """
-    return self._pex_info.get('inherit_path', False)
+    return self._pex_info.get('inherit_path', 'false')
 
   @inherit_path.setter
   def inherit_path(self, value):
-    self._pex_info['inherit_path'] = bool(value)
+    if value is False:
+      value = 'false'
+    elif value is True:
+      value = 'prefer'
+    self._pex_info['inherit_path'] = value
+
+  @property
+  def interpreter_constraints(self):
+    """A list of constraints that determine the interpreter compatibility for this
+    pex, using the Requirement-style format, e.g. ``'CPython>=3', or just '>=2.7,<3'``
+    for requirements agnostic to interpreter class.
+
+    This property will be used at exec time when bootstrapping a pex to search PEX_PYTHON_PATH
+    for a list of compatible interpreters.
+    """
+    return list(self._interpreter_constraints)
+
+  def add_interpreter_constraint(self, value):
+    self._interpreter_constraints.add(str(value))
 
   @property
   def ignore_errors(self):
@@ -260,13 +296,23 @@ class PexInfo(object):
       raise TypeError('Cannot merge a %r with PexInfo' % type(other))
     self._pex_info.update(other._pex_info)
     self._distributions.update(other.distributions)
+    self._interpreter_constraints.update(other.interpreter_constraints)
     self._requirements.update(other.requirements)
 
   def dump(self, **kwargs):
     pex_info_copy = self._pex_info.copy()
     pex_info_copy['requirements'] = list(self._requirements)
+    pex_info_copy['interpreter_constraints'] = list(self._interpreter_constraints)
     pex_info_copy['distributions'] = self._distributions.copy()
     return json.dumps(pex_info_copy, **kwargs)
 
   def copy(self):
     return self.from_json(self.dump())
+
+  def merge_pex_path(self, pex_path):
+    """Merges a new PEX_PATH definition into the existing one (if any).
+    :param string pex_path: The PEX_PATH to merge.
+    """
+    if not pex_path:
+      return
+    self.pex_path = ':'.join(merge_split(self.pex_path, pex_path))

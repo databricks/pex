@@ -3,23 +3,31 @@
 
 import os
 import stat
-import zipfile
-from contextlib import closing
 
 import pytest
 from twitter.common.contextutil import temporary_dir
 from twitter.common.dirutil import safe_mkdir
 
+from pex.common import open_zip
 from pex.compatibility import WINDOWS, nested
 from pex.pex import PEX
 from pex.pex_builder import PEXBuilder
-from pex.testing import write_simple_pex as write_pex
 from pex.testing import make_bdist
+from pex.testing import write_simple_pex as write_pex
 from pex.util import DistributionHelper
-
 
 exe_main = """
 import sys
+from my_package.my_module import do_something
+do_something()
+
+with open(sys.argv[1], 'w') as fp:
+  fp.write('success')
+"""
+
+wheeldeps_exe_main = """
+import sys
+from pyparsing import *
 from my_package.my_module import do_something
 do_something()
 
@@ -44,7 +52,7 @@ def test_pex_builder():
       td1, td2, p1):
     target_egg_dir = os.path.join(td2, os.path.basename(p1.location))
     safe_mkdir(target_egg_dir)
-    with closing(zipfile.ZipFile(p1.location, 'r')) as zf:
+    with open_zip(p1.location, 'r') as zf:
       zf.extractall(target_egg_dir)
     p1 = DistributionHelper.distribution_from_path(target_egg_dir)
 
@@ -52,6 +60,21 @@ def test_pex_builder():
 
     success_txt = os.path.join(td1, 'success.txt')
     PEX(td1).run(args=[success_txt])
+    assert os.path.exists(success_txt)
+    with open(success_txt) as fp:
+      assert fp.read() == 'success'
+
+
+def test_pex_builder_wheeldep():
+  """Repeat the pex_builder test, but this time include an import of
+  something from a wheel that doesn't come in importable form.
+  """
+  with nested(temporary_dir(), make_bdist('p1', zipped=True)) as (td, p1):
+    pyparsing_path = "./tests/example_packages/pyparsing-2.1.10-py2.py3-none-any.whl"
+    dist = DistributionHelper.distribution_from_path(pyparsing_path)
+    write_pex(td, wheeldeps_exe_main, dists=[p1, dist])
+    success_txt = os.path.join(td, 'success.txt')
+    PEX(td).run(args=[success_txt])
     assert os.path.exists(success_txt)
     with open(success_txt) as fp:
       assert fp.read() == 'success'
@@ -71,6 +94,30 @@ def test_pex_builder_shebang():
         expected_preamble = b'#!foobar\n'
         with open(target, 'rb') as fp:
           assert fp.read(len(expected_preamble)) == expected_preamble
+
+
+def test_pex_builder_preamble():
+  with temporary_dir() as td:
+    target = os.path.join(td, 'foo.pex')
+    should_create = os.path.join(td, 'foo.1')
+
+    tempfile_preamble = "\n".join([
+      "import sys",
+      "open('{0}', 'w').close()".format(should_create),
+      "sys.exit(3)"
+    ])
+
+    pex_builder = PEXBuilder(preamble=tempfile_preamble)
+    pex_builder.build(target)
+
+    assert not os.path.exists(should_create)
+
+    pex = PEX(target)
+    process = pex.run(blocking=False)
+    process.wait()
+
+    assert process.returncode == 3
+    assert os.path.exists(should_create)
 
 
 def test_pex_builder_compilation():

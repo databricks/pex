@@ -1,21 +1,25 @@
 # Copyright 2014 Pants project contributors (see CONTRIBUTORS.md).
 # Licensed under the Apache License, Version 2.0 (see LICENSE).
 
-import contextlib
 import functools
 import os
-import zipfile
 from hashlib import sha1
 from textwrap import dedent
 
 from twitter.common.contextutil import temporary_dir
 
-from pex.common import safe_mkdir
-from pex.compatibility import nested
+from pex.common import open_zip, safe_mkdir
+from pex.compatibility import nested, to_bytes
 from pex.installer import EggInstaller, WheelInstaller
 from pex.pex_builder import PEXBuilder
 from pex.testing import make_bdist, run_simple_pex, temporary_content, write_zipfile
-from pex.util import CacheHelper, DistributionHelper, named_temporary_file
+from pex.util import (
+    CacheHelper,
+    DistributionHelper,
+    iter_pth_paths,
+    merge_split,
+    named_temporary_file
+)
 
 try:
   from unittest import mock
@@ -60,7 +64,7 @@ def test_hash_consistency():
       dir_hash = CacheHelper.dir_hash(td)
       with named_temporary_file() as tf:
         write_zipfile(td, tf.name, reverse=reverse)
-        with contextlib.closing(zipfile.ZipFile(tf.name, 'r')) as zf:
+        with open_zip(tf.name, 'r') as zf:
           zip_hash = CacheHelper.zip_hash(zf)
           assert zip_hash == dir_hash
           assert zip_hash != sha1().hexdigest()  # make sure it's not an empty hash
@@ -174,3 +178,49 @@ def test_distributionhelper_egg_assert():
     'setuptools'
   )
   assert len(d.resource_listdir('/')) > 3
+
+
+@mock.patch('os.path.exists', autospec=True, spec_set=True)
+def test_iter_pth_paths(mock_exists):
+  # Ensure path checking always returns True for dummy paths.
+  mock_exists.return_value = True
+
+  with temporary_dir() as tmpdir:
+    in_tmp = lambda f: os.path.join(tmpdir, f)
+
+    PTH_TEST_MAPPING = {
+      # A mapping of .pth file content -> expected paths.
+      '/System/Library/Frameworks/Python.framework/Versions/2.7/Extras/lib/python\n': [
+        '/System/Library/Frameworks/Python.framework/Versions/2.7/Extras/lib/python'
+      ],
+      'relative_path\nrelative_path2\n\nrelative_path3': [
+        in_tmp('relative_path'),
+        in_tmp('relative_path2'),
+        in_tmp('relative_path3')
+      ],
+      'duplicate_path\nduplicate_path': [in_tmp('duplicate_path')],
+      'randompath\nimport nosuchmodule\n': [in_tmp('randompath')],
+      'import nosuchmodule\nfoo': [],
+      'import nosuchmodule\n': [],
+      'import bad)syntax\n': [],
+    }
+
+    for i, pth_content in enumerate(PTH_TEST_MAPPING):
+      pth_tmp_path = os.path.abspath(os.path.join(tmpdir, 'test%s.pth' % i))
+      with open(pth_tmp_path, 'wb') as f:
+        f.write(to_bytes(pth_content))
+      assert sorted(PTH_TEST_MAPPING[pth_content]) == sorted(list(iter_pth_paths(pth_tmp_path)))
+
+
+def test_merge_split():
+  path_1, path_2 = '/pex/path/1:/pex/path/2', '/pex/path/3:/pex/path/4'
+  result = merge_split(path_1, path_2)
+  assert result == ['/pex/path/1', '/pex/path/2', '/pex/path/3', '/pex/path/4']
+
+  path_1, path_2 = '/pex/path/1:', '/pex/path/3:/pex/path/4'
+  result = merge_split(path_1, path_2)
+  assert result == ['/pex/path/1', '/pex/path/3', '/pex/path/4']
+
+  path_1, path_2 = '/pex/path/1::/pex/path/2', '/pex/path/3:/pex/path/4'
+  result = merge_split(path_1, path_2)
+  assert result == ['/pex/path/1', '/pex/path/2', '/pex/path/3', '/pex/path/4']

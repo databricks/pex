@@ -1,6 +1,256 @@
 Release Notes
 =============
 
+1.4.5
+-----
+
+This release adds support for validating pex entrypoints at build time in addition to several bugfixes.
+
+* Fix PEX environment setup. (#531)
+  `#531 <https://github.com/pantsbuild/pants/pull/531>`_
+
+* Fix installers to be insensitive to extras iteration order. (#532)
+  `#532 <https://github.com/pantsbuild/pants/pull/532>`_
+
+* Validate entry point at build time (#521)
+  `#521 <https://github.com/pantsbuild/pants/pull/521>`_
+
+* Fix pex extraction perms. (#528)
+  `#528 <https://github.com/pantsbuild/pants/pull/528>`_
+
+* Simplify `.travis.yml`. (#524)
+  `#524 <https://github.com/pantsbuild/pants/pull/524>`_
+
+* Fix `PythonInterpreter` caching and ergonomics. (#518)
+  `#518 <https://github.com/pantsbuild/pants/pull/518>`_
+
+* Add missing git dep. (#519)
+  `#519 <https://github.com/pantsbuild/pants/pull/519>`_
+
+* Introduce a controlled env for pex testing. (#517)
+  `#517 <https://github.com/pantsbuild/pants/pull/517>`_
+
+* Bump wheel version to latest. (#515)
+  `#515 <https://github.com/pantsbuild/pants/pull/515>`_
+
+* Invoke test runner at a more granular level for pypy shard. (#513)
+  `#513 <https://github.com/pantsbuild/pants/pull/513>`_
+
+1.4.4
+-----
+
+This release adds support for including sources and resources directly in a produced pex - without the need to use pants.
+
+* Add resource / source bundling to pex cli (#507)
+  `#507 <https://github.com/pantsbuild/pex/pull/507>`_
+
+1.4.3
+-----
+
+Another bugfix release for the 1.4.x series.
+
+* Repair environmental marker platform setting. (#500)
+  `#500 <https://github.com/pantsbuild/pex/pull/500>`_
+
+* Broaden abi selection for non-specified abi types. (#503)
+  `#503 <https://github.com/pantsbuild/pex/pull/503>`_
+
+1.4.2
+-----
+
+This release repairs a tag matching regression for .egg dists that inadvertently went out in 1.4.1.
+
+* Improve tag generation for EggPackage. (#493)
+  `#493 <https://github.com/pantsbuild/pex/pull/493>`_
+
+1.4.1
+-----
+
+A bugfix release for 1.4.x.
+
+* Repair abi prefixing for PyPy. (#483)
+  `#483 <https://github.com/pantsbuild/pex/pull/483>`_
+
+* Repair .egg resolution for platform specific eggs. (#486)
+  `#486 <https://github.com/pantsbuild/pex/pull/486>`_
+
+* Eliminate the python3.3 shard. (#488)
+  `#488 <https://github.com/pantsbuild/pex/pull/488>`_
+
+1.4.0
+-----
+
+This release includes full Manylinux support, improvements to wheel resolution (including first class platform/abi tag targeting) and a handful of other improvements and bugfixes. Enjoy!
+
+Special thanks to Dan Blanchard (@dan-blanchard) for seeding the initial PR for Manylinux support and wheel resolution improvements.
+
+* Complete manylinux support in pex. (#480)
+  `#480 <https://github.com/pantsbuild/pex/pull/480>`_
+
+* Add manylinux wheel support and fix a few bugs along the way (#316)
+  `#316 <https://github.com/pantsbuild/pex/pull/316>`_
+
+* Skip failing tests on pypy shard. (#478)
+  `#478 <https://github.com/pantsbuild/pex/pull/478>`_
+
+* Bump travis image to Trusty. (#476)
+  `#476 <https://github.com/pantsbuild/pex/pull/476>`_
+
+* Mock PATH for problematic interpreter selection test in CI (#474)
+  `#474 <https://github.com/pantsbuild/pex/pull/474>`_
+
+* Skip two failing integration tests. (#472)
+  `#472 <https://github.com/pantsbuild/pex/pull/472>`_
+
+* Better error handling for missing setuptools. (#471)
+  `#471 <https://github.com/pantsbuild/pex/pull/471>`_
+
+* Add tracebacks to IntegResults. (#469)
+  `#469 <https://github.com/pantsbuild/pex/pull/469>`_
+
+* Fix failing tests in master (#466)
+  `#466 <https://github.com/pantsbuild/pex/pull/466>`_
+
+* Repair isort-check failure in master. (#465)
+  `#465 <https://github.com/pantsbuild/pex/pull/465>`_
+
+* Repair style issues in master. (#464)
+  `#464 <https://github.com/pantsbuild/pex/pull/464>`_
+
+* Fixup PATH handling in travis.yml. (#462)
+  `#462 <https://github.com/pantsbuild/pex/pull/462>`_
+
+1.3.2
+-----
+
+* Add blacklist handling for skipping requirements in pex resolver #457
+  `#457 <https://github.com/pantsbuild/pex/pull/457>`_
+
+1.3.1
+-----
+
+This is a bugfix release for a regression that inadvertently went out in 1.3.0.
+
+* scrub path when not inheriting (#449)
+  `#449 <https://github.com/pantsbuild/pex/pull/449>`_
+
+* Fix up inherits_path tests to use new values (#450)
+  `#450 <https://github.com/pantsbuild/pex/pull/450>`_
+
+1.3.0
+-----
+
+* inherit_path allows 'prefer', 'fallback', 'false' (#444)
+  `#444 <https://github.com/pantsbuild/pex/pull/444>`_
+
+1.2.16
+------
+
+* Change PEX re-exec variable from ENV to os.environ (#441)
+  `#441 <https://github.com/pantsbuild/pex/pull/441>`_
+
+1.2.15
+------
+
+* Bugfix for entry point targeting + integration test (#435)
+  `#435 <https://github.com/pantsbuild/pex/pull/435>`_
+
+1.2.14
+------
+
+* Add interpreter constraints option and use constraints to search for compatible interpreters at exec time (#427)
+  `#427 <https://github.com/pantsbuild/pex/pull/427>`_
+
+1.2.13
+------
+
+* Fix handling of pre-release option. (#424)
+  `#424 <https://github.com/pantsbuild/pex/pull/424>`_
+
+* Patch sys module using pex_path from PEX-INFO metadata (#421)
+  `#421 <https://github.com/pantsbuild/pex/pull/421>`_
+
+1.2.12
+------
+
+* Create --pex-path argument for pex cli and load pex path into pex-info metadata (#417)
+  `#417 <https://github.com/pantsbuild/pex/pull/417>`_
+
+1.2.11
+------
+
+* Leverage `subprocess32` when available. (#411)
+  `#411 <https://github.com/pantsbuild/pex/pull/411>`_
+
+* Kill support for python 2.6. (#408)
+  `#405 <https://github.com/pantsbuild/pex/issues/405>`_
+  `#408 <https://github.com/pantsbuild/pex/pull/408>`_
+
+1.2.10
+------
+
+* Allow passing a preamble file to the CLI (#400)
+  `#400 <https://github.com/pantsbuild/pex/pull/400>`_
+
+1.2.9
+-----
+
+* Add first-class support for multi-interpreter and multi-platform pex construction. (#394)
+  `#394 <https://github.com/pantsbuild/pex/pull/394>`_
+
+1.2.8
+-----
+
+* Minimum setuptools version should be 20.3 (#391)
+  `#391 <https://github.com/pantsbuild/pex/pull/391>`_
+
+* Improve wheel support in pex. (#388)
+  `#388 <https://github.com/pantsbuild/pex/pull/388>`_
+
+1.2.7
+-----
+
+* Sort keys in PEX-INFO file so the output is deterministic. (#384)
+  `#384 <https://github.com/pantsbuild/pex/pull/384>`_
+
+* Pass platform for SourceTranslator (#386)
+  `#386 <https://github.com/pantsbuild/pex/pull/386>`_
+
+1.2.6
+-----
+
+* Fix for Ambiguous Resolvable bug in transitive dependency resolution (#367)
+  `#367 <https://github.com/pantsbuild/pex/pull/367>`_
+
+1.2.5
+-----
+
+This release follows-up on 1.2.0 fixing bugs in the pre-release resolving code paths.
+
+* Resolving pre-release when explicitly requested (#372)
+  `#374 <https://github.com/pantsbuild/pex/pull/374>`_
+
+* Pass allow_prerelease to other iterators (Static, Caching) (#373)
+  `#373 <https://github.com/pantsbuild/pex/pull/373>`_
+
+1.2.4
+-----
+
+* Fix bug in cached dependency resolution with exact resolvable. (#365)
+  `#365 <https://github.com/pantsbuild/pex/pull/365>`_
+
+* Treat .pth injected paths as extras. (#370)
+  `#370 <https://github.com/pantsbuild/pex/pull/370>`_
+
+1.2.3
+-----
+
+* Follow redirects on HTTP requests (#361)
+  `#361 <https://github.com/pantsbuild/pex/pull/361>`_
+
+* Fix corner case in cached dependency resolution (#362)
+  `#362 <https://github.com/pantsbuild/pex/pull/362>`_
+
 1.2.2
 -----
 

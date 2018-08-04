@@ -17,19 +17,19 @@ from .translator import ChainedTranslator, EggTranslator, SourceTranslator, Whee
 
 class ResolverOptionsInterface(object):
   def get_context(self):
-    raise NotImplemented
+    raise NotImplementedError
 
   def get_crawler(self):
-    raise NotImplemented
+    raise NotImplementedError
 
   def get_sorter(self):
-    raise NotImplemented
+    raise NotImplementedError
 
-  def get_translator(self, interpreter, platform):
-    raise NotImplemented
+  def get_translator(self, interpreter, supported_tags):
+    raise NotImplementedError
 
   def get_iterator(self):
-    raise NotImplemented
+    raise NotImplementedError
 
 
 class ResolverOptionsBuilder(object):
@@ -43,7 +43,8 @@ class ResolverOptionsBuilder(object):
                allow_all_external=False,
                allow_external=None,
                allow_unverified=None,
-               allow_prereleases=False,
+               allow_prereleases=None,
+               use_manylinux=None,
                precedence=None,
                context=None):
     self._fetchers = fetchers if fetchers is not None else [PyPIFetcher()]
@@ -53,6 +54,7 @@ class ResolverOptionsBuilder(object):
     self._allow_prereleases = allow_prereleases
     self._precedence = precedence if precedence is not None else Sorter.DEFAULT_PACKAGE_PRECEDENCE
     self._context = context or Context.get()
+    self._use_manylinux = use_manylinux
 
   def clone(self):
     return ResolverOptionsBuilder(
@@ -61,6 +63,7 @@ class ResolverOptionsBuilder(object):
         allow_external=self._allow_external.copy(),
         allow_unverified=self._allow_unverified.copy(),
         allow_prereleases=self._allow_prereleases,
+        use_manylinux=self._use_manylinux,
         precedence=self._precedence[:],
         context=self._context,
     )
@@ -107,6 +110,14 @@ class ResolverOptionsBuilder(object):
         [precedent for precedent in self._precedence if precedent is not WheelPackage])
     return self
 
+  def use_manylinux(self):
+    self._use_manylinux = True
+    return self
+
+  def no_use_manylinux(self):
+    self._use_manylinux = False
+    return self
+
   def allow_builds(self):
     if SourcePackage not in self._precedence:
       self._precedence = self._precedence + (SourcePackage,)
@@ -116,6 +127,31 @@ class ResolverOptionsBuilder(object):
     self._precedence = tuple(
         [precedent for precedent in self._precedence if precedent is not SourcePackage])
     return self
+
+  # TODO: Make this whole interface more Pythonic.
+  #
+  # This method would be better defined as a property allow_prereleases.
+  # Unfortunately, the existing method below already usurps the name allow_prereleases.
+  # It is an existing API that returns self as if it was written in an attempt to allow
+  # Java style chaining of method calls.
+  # Due to that return type, it cannot be used as a Python property setter.
+  # It's currently used in this manner:
+  #
+  #     builder.allow_prereleases(True)
+  #
+  # and we cannot change it into @allow_prereleases.setter and use in this manner:
+  #
+  #     builder.allow_prereleases = True
+  #
+  # without affecting the existing API calls.
+  #
+  # The code review shows that, for this particular method (allow_prereleases),
+  # the return value (self) is never used in the current API calls.
+  # It would be worth examining if the API change for this and some other methods here
+  # would be a good idea.
+  @property
+  def prereleases_allowed(self):
+    return self._allow_prereleases
 
   def allow_prereleases(self, allowed):
     self._allow_prereleases = allowed
@@ -127,6 +163,7 @@ class ResolverOptionsBuilder(object):
         allow_external=self._allow_all_external or key in self._allow_external,
         allow_unverified=key in self._allow_unverified,
         allow_prereleases=self._allow_prereleases,
+        use_manylinux=self._use_manylinux,
         precedence=self._precedence,
         context=self._context,
     )
@@ -137,13 +174,15 @@ class ResolverOptions(ResolverOptionsInterface):
                fetchers=None,
                allow_external=False,
                allow_unverified=False,
-               allow_prereleases=False,
+               allow_prereleases=None,
+               use_manylinux=None,
                precedence=None,
                context=None):
     self._fetchers = fetchers if fetchers is not None else [PyPIFetcher()]
     self._allow_external = allow_external
     self._allow_unverified = allow_unverified
     self._allow_prereleases = allow_prereleases
+    self._use_manylinux = use_manylinux
     self._precedence = precedence if precedence is not None else Sorter.DEFAULT_PACKAGE_PRECEDENCE
     self._context = context or Context.get()
 
@@ -159,7 +198,7 @@ class ResolverOptions(ResolverOptionsInterface):
   def get_sorter(self):
     return Sorter(self._precedence)
 
-  def get_translator(self, interpreter, platform):
+  def get_translator(self, interpreter, supported_tags):
     translators = []
 
     # TODO(wickman) This is not ideal -- consider an explicit link between a Package
@@ -167,12 +206,15 @@ class ResolverOptions(ResolverOptionsInterface):
     # easily add new package types (or we just forego that forever.)
     for package in self._precedence:
       if package is WheelPackage:
-        translators.append(WheelTranslator(interpreter=interpreter, platform=platform))
+        translators.append(WheelTranslator(supported_tags=supported_tags))
       elif package is EggPackage:
-        translators.append(EggTranslator(interpreter=interpreter, platform=platform))
+        translators.append(EggTranslator(supported_tags=supported_tags))
       elif package is SourcePackage:
         installer_impl = WheelInstaller if WheelPackage in self._precedence else EggInstaller
-        translators.append(SourceTranslator(installer_impl=installer_impl, interpreter=interpreter))
+        translators.append(SourceTranslator(
+            installer_impl=installer_impl,
+            interpreter=interpreter,
+            supported_tags=supported_tags))
 
     return ChainedTranslator(*translators)
 
