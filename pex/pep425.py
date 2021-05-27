@@ -25,6 +25,24 @@ class PEP425Extras(object):
     invalid_tag = ValueError('invalid macosx tag: %s' % platform_tag)
     if not cls.is_macosx_platform(platform_tag):
       raise invalid_tag
+
+    # HACK: macOS 11 has tags like macosx_11_x86_64
+    # and this breaks this parsing because it assumes the minor version
+    # is present on the tag
+    segments = platform_tag.split('_', 2)
+    if len(segments) != 3:
+        raise invalid_tag
+    if segments[0] != 'macosx':
+      raise invalid_tag
+    # Minor is not present
+    if not segments[2].isdigit():
+        try:
+            major, minor = int(segments[1]), 0
+            platform = segments[2]
+        except ValueError:
+            raise invalid_tag
+        return major, minor, platform
+
     segments = platform_tag.split('_', 3)
     if len(segments) != 4:
       raise invalid_tag
