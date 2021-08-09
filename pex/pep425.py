@@ -31,8 +31,13 @@ class PEP425Extras(object):
     if segments[0] != 'macosx':
       raise invalid_tag
     try:
-      major, minor = int(segments[1]), int(segments[2])
-      platform = segments[3]
+      major= int(segments[1])
+      try:
+        minor = int(segments[2])
+        platform = segments[3]
+      except ValueError:
+        minor = 0
+        platform = segments[2]
     except ValueError:
       raise invalid_tag
     return major, minor, platform
