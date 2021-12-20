@@ -22,9 +22,9 @@ import zipimport
 import pkg_resources
 
 if sys.version_info >= (3, 3) and sys.implementation.name == "cpython":
-  import importlib._bootstrap as importlib_bootstrap
+  import importlib.machinery as importlib_machinery
 else:
-  importlib_bootstrap = None
+  importlib_machinery = None
 
 
 class ChainedFinder(object):
@@ -213,8 +213,8 @@ def register_finders():
   # append the wheel finder
   _add_finder(pkgutil.ImpImporter, find_wheels_on_path)
 
-  if importlib_bootstrap is not None:
-    _add_finder(importlib_bootstrap.FileFinder, find_wheels_on_path)
+  if importlib_machinery is not None:
+    _add_finder(importlib_machinery.FileFinder, find_wheels_on_path)
 
   __PREVIOUS_FINDER = previous_finder
 
