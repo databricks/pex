@@ -3,12 +3,7 @@
 
 from __future__ import absolute_import
 
-try:
-    # Python 3
-    from collections.abc import Iterable
-except ImportError:
-    # Python 2.7
-    from collections import Iterable
+from collections import Iterable
 
 from pkg_resources import Requirement
 

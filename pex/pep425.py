@@ -99,7 +99,7 @@ class PEP425(object):  # noqa
     """
     # Predict soabi for reasonable interpreters.  This is technically wrong but essentially right.
     abis = []
-    if impl == 'cp':
+    if impl == 'cp' and version.startswith('3'):
       abis.extend([
         'cp%s' % version,
         'cp%sdmu' % version, 'cp%sdm' % version, 'cp%sdu' % version, 'cp%sd' % version,

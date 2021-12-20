@@ -5,12 +5,7 @@ from __future__ import absolute_import
 
 import os
 import posixpath
-try:
-    # Python 3
-    from collections.abc import Iterable
-except ImportError:
-    # Python 2.7
-    from collections import Iterable
+from collections import Iterable
 
 from .compatibility import string as compatible_string
 from .compatibility import PY3, WINDOWS, pathname2url, url2pathname

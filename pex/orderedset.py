@@ -8,15 +8,10 @@
 # modifications
 #
 
-try:
-    # Python 3
-    from collections.abc import MutableSet as CollectionsMutableSet
-except ImportError:
-    # Python 2.7
-    from collections import MutableSet as CollectionsMutableSet
+import collections
 
 
-class OrderedSet(CollectionsMutableSet):
+class OrderedSet(collections.MutableSet):
   KEY, PREV, NEXT = range(3)
 
   def __init__(self, iterable=None):
