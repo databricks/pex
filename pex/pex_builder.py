@@ -432,7 +432,7 @@ class PEXBuilder(object):
       safe_mkdir(os.path.dirname(filename))
     self._chroot.zip(filename + '~', mode='a')
 
-    with open(filename + '~', 'r') as original:
+    with open(filename + '~', 'rb') as original:
       data = original.read()
     with open(filename + '~', 'wb') as modified:
       modified.write(to_bytes('%s\n' % self._shebang))

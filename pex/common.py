@@ -333,18 +333,17 @@ class Chroot(object):
     shutil.rmtree(self.chroot)
 
   def zip(self, filename, mode='wb'):
-    print("===========")
-    print(filename)
-    print("===========")
     if mode == 'a':
-      cmd = ["zip", "-Ar", filename] + [os.path.join(self.chroot, f) for f in sorted(self.files())]
-      print(cmd)
-      zip_process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+      # cmd = ["zip", "-0", "-Ar", os.path.join(os.getcwd(), filename)] + sorted(self.files())
+
+      cmd = ["7z", "a", "-tzip", os.path.join(os.getcwd(), filename + ".")] + sorted(self.files())
+      zip_process = subprocess.Popen(cmd, cwd=self.chroot, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
       (stdout, stderr) = zip_process.communicate()
+      print(stdout)
+      print(stderr)
       exit_code = zip_process.wait()
       if exit_code != 0:
         raise Exception("Non-zero exit-code:%s\nSTDOUT:%s\nSTDERR:\n%s" % (exit_code, stdout, stderr))
-      assert os.path.exists(filename), filename
     else:
       with contextlib.closing(zipfile.ZipFile(filename, mode)) as zf:
         for f in sorted(self.files()):
