@@ -430,10 +430,18 @@ class PEXBuilder(object):
       pass
     if os.path.dirname(filename):
       safe_mkdir(os.path.dirname(filename))
-    with open(filename + '~', 'ab') as pexfile:
-      assert os.path.getsize(pexfile.name) == 0
-      pexfile.write(to_bytes('%s\n' % self._shebang))
     self._chroot.zip(filename + '~', mode='a')
+
+    with open(filename + '~', 'r') as original:
+      data = original.read()
+    with open(filename + '~', 'wb') as modified:
+      modified.write(to_bytes('%s\n' % self._shebang))
+      modified.write(data)
+
+    # with open(filename + '~', 'ab') as pexfile:
+    #   assert os.path.getsize(pexfile.name) == 0
+    #   pexfile.write(to_bytes('%s\n' % self._shebang))
+
     if os.path.exists(filename):
       os.unlink(filename)
     os.rename(filename + '~', filename)
