@@ -5,6 +5,7 @@ from __future__ import absolute_import
 
 import logging
 import os
+from multiprocessing.pool import Pool, ThreadPool
 
 from pkg_resources import DefaultProvider, ZipProvider, get_provider
 
@@ -284,6 +285,36 @@ class PEXBuilder(object):
 
     # add dependency key so that it can rapidly be retrieved from cache
     self._pex_info.add_distribution(dist_name, dist_hash)
+
+  def add_distributions(self, dists):
+    """Add a :class:`pkg_resources.Distribution` from its handle.
+
+    :param dist: The distribution to add to this environment.
+    :keyword dist_name: (optional) The name of the distribution e.g. 'Flask-0.10.0'.  By default
+      this will be inferred from the distribution itself should it be formatted in a standard way.
+    :type dist: :class:`pkg_resources.Distribution`
+    """
+    for dist in dists:
+      self._ensure_unfrozen('Adding a distribution')
+      self._distributions.add(dist)
+
+    def hash_dist(dist):
+      dist_name = os.path.basename(dist.location)
+      if os.path.isdir(dist.location):
+        dist_hash = self._add_dist_dir(dist.location, dist_name)
+      else:
+        dist_hash = self._add_dist_zip(dist.location, dist_name)
+
+      return (dist_name, dist_hash)
+
+    pool = ThreadPool(processes=10)
+    hashes = pool.map(hash_dist, dists)
+    pool.close()
+    pool.join()
+
+    for dist_name, dist_hash in hashes:
+      # add dependency key so that it can rapidly be retrieved from cache
+      self._pex_info.add_distribution(dist_name, dist_hash)
 
   def add_dist_location(self, dist, name=None):
     """Add a distribution by its location on disk.
