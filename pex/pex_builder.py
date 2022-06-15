@@ -5,6 +5,10 @@ from __future__ import absolute_import
 
 import logging
 import os
+import subprocess
+import tempfile
+# from multiprocessing.pool import Pool, ThreadPool
+from pathos.pools import ProcessPool
 
 from pkg_resources import DefaultProvider, ZipProvider, get_provider
 
@@ -284,6 +288,59 @@ class PEXBuilder(object):
 
     # add dependency key so that it can rapidly be retrieved from cache
     self._pex_info.add_distribution(dist_name, dist_hash)
+
+  def add_distributions(self, dists):
+    """Add a :class:`pkg_resources.Distribution` from its handle.
+
+    :param dist: The distribution to add to this environment.
+    :keyword dist_name: (optional) The name of the distribution e.g. 'Flask-0.10.0'.  By default
+      this will be inferred from the distribution itself should it be formatted in a standard way.
+    :type dist: :class:`pkg_resources.Distribution`
+    """
+    self._ensure_unfrozen('Adding a distribution')
+    for dist in dists:
+      assert not os.path.isdir(dist.location), dist.location
+      self._distributions.add(dist)
+      path = dist.location
+      dist_name = os.path.basename(dist.location)
+      # with open_zip(path) as zf:
+      #   for name in zf.namelist():
+      #     if name.endswith('/'):
+      #       continue
+      #     target = os.path.join(self._pex_info.internal_cache, dist_name, name)
+      #     self._chroot.write(zf.read(name), target)
+
+      tmp_dir = tempfile.mkdtemp()
+      cmd = ["7z", "x", path, "-o%s" % tmp_dir]
+      zip_process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+      (stdout, stderr) = zip_process.communicate()
+      exit_code = zip_process.wait()
+      if exit_code != 0:
+        raise Exception("Non-zero exit-code:%s\nSTDOUT:%s\nSTDERR:\n%s" % (exit_code, stdout, stderr))
+
+      for root, dirs, files in os.walk(tmp_dir, topdown=False):
+        for n in files:
+          name = os.path.join(os.path.relpath(root, tmp_dir), n)
+          print(name)
+          full_path = os.path.join(tmp_dir, name)
+          if os.path.isdir(full_path):
+            continue
+          target = os.path.join(self._pex_info.internal_cache, dist_name, name)
+          self._chroot.copy(full_path, target)
+
+    def hash_dist(path):
+      dist_name = os.path.basename(path)
+      with open_zip(path) as zf:
+        return (dist_name, CacheHelper.zip_hash(zf))
+
+    pool = ProcessPool(processes=10)
+    hashes = pool.map(hash_dist, [dist.location for dist in dists])
+    pool.close()
+    pool.join()
+
+    for dist_name, dist_hash in hashes:
+      # add dependency key so that it can rapidly be retrieved from cache
+      self._pex_info.add_distribution(dist_name, dist_hash)
 
   def add_dist_location(self, dist, name=None):
     """Add a distribution by its location on disk.
