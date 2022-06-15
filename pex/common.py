@@ -336,7 +336,7 @@ class Chroot(object):
     if mode == 'a':
       # cmd = ["zip", "-0", "-Ar", os.path.join(os.getcwd(), filename)] + sorted(self.files())
 
-      cmd = ["7z", "a", "-tzip", os.path.join(os.getcwd(), filename + ".")] + sorted(self.files())
+      cmd = ["7z", "a", "-mx=1", "-tzip", os.path.join(os.getcwd(), filename + ".")] + sorted(self.files())
       zip_process = subprocess.Popen(cmd, cwd=self.chroot, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
       (stdout, stderr) = zip_process.communicate()
       print(stdout)
