@@ -7,6 +7,7 @@ import logging
 import os
 
 from pkg_resources import DefaultProvider, ZipProvider, get_provider
+import subprocess
 
 from .common import Chroot, chmod_plus_x, open_zip, safe_mkdir, safe_mkdtemp
 from .compatibility import to_bytes
@@ -260,7 +261,18 @@ class PEXBuilder(object):
           continue
         target = os.path.join(self._pex_info.internal_cache, dist_name, name)
         self._chroot.write(zf.read(name), target)
-      return CacheHelper.zip_hash(zf)
+      # return CacheHelper.zip_hash(zf)
+      cmd = ["xxhsum", "-H2", zf.filename]
+      process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+      (stdout, stderr) = process.communicate()
+      print(stdout)
+      exit_code = process.wait()
+      if exit_code != 0:
+        raise Exception("Non-zero exit-code:%s\nSTDOUT:%s\nSTDERR:\n%s" % (exit_code, stdout, stderr))
+      hash_sum = stdout.decode("ascii").split(' ')[0]
+      print(hash_sum)
+
+      return hash_sum
 
   def _prepare_code_hash(self):
     self._pex_info.code_hash = CacheHelper.pex_hash(self._chroot.path())
