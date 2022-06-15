@@ -8,6 +8,7 @@ import os
 
 from pkg_resources import DefaultProvider, ZipProvider, get_provider
 import subprocess
+import tempfile
 
 from .common import Chroot, chmod_plus_x, open_zip, safe_mkdir, safe_mkdtemp
 from .compatibility import to_bytes
@@ -255,24 +256,42 @@ class PEXBuilder(object):
     return CacheHelper.dir_hash(path)
 
   def _add_dist_zip(self, path, dist_name):
-    with open_zip(path) as zf:
-      for name in zf.namelist():
-        if name.endswith('/'):
-          continue
-        target = os.path.join(self._pex_info.internal_cache, dist_name, name)
-        self._chroot.write(zf.read(name), target)
-      # return CacheHelper.zip_hash(zf)
-      cmd = ["xxhsum", "-H2", zf.filename]
-      process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-      (stdout, stderr) = process.communicate()
-      print(stdout)
-      exit_code = process.wait()
-      if exit_code != 0:
-        raise Exception("Non-zero exit-code:%s\nSTDOUT:%s\nSTDERR:\n%s" % (exit_code, stdout, stderr))
-      hash_sum = stdout.decode("ascii").split(' ')[0]
-      print(hash_sum)
+    # with open_zip(path) as zf:
+    #   for name in zf.namelist():
+    #     if name.endswith('/'):
+    #       continue
+    #     target = os.path.join(self._pex_info.internal_cache, dist_name, name)
+    #     self._chroot.write(zf.read(name), target)
+    #   return CacheHelper.zip_hash(zf)
 
-      return hash_sum
+    tmp_dir = tempfile.mkdtemp()
+    cmd = ["7z", "x", path, "-o%s" % tmp_dir]
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    (stdout, stderr) = process.communicate()
+    print(stdout)
+    exit_code = process.wait()
+    if exit_code != 0:
+      raise Exception("Non-zero exit-code:%s\nSTDOUT:%s\nSTDERR:\n%s" % (exit_code, stdout, stderr))
+
+    for dir_path, _, file_names in os.walk(tmp_dir):
+      for file_name in file_names:
+        relative_dir_path = os.path.relpath(dir_path, tmp_dir)
+        name = os.path.join(relative_dir_path, file_name)
+        target = os.path.join(self._pex_info.internal_cache, dist_name, name)
+        print(target)
+        self._chroot.link(os.path.join(dir_path, file_name), target)
+
+    cmd = ["xxhsum", "-H2", path]
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    (stdout, stderr) = process.communicate()
+    print(stdout)
+    exit_code = process.wait()
+    if exit_code != 0:
+      raise Exception("Non-zero exit-code:%s\nSTDOUT:%s\nSTDERR:\n%s" % (exit_code, stdout, stderr))
+    hash_sum = stdout.decode("ascii").split(' ')[0]
+    print(hash_sum)
+
+    return hash_sum
 
   def _prepare_code_hash(self):
     self._pex_info.code_hash = CacheHelper.pex_hash(self._chroot.path())
