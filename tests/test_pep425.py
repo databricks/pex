@@ -27,15 +27,16 @@ def test_platform_iterator():
       'macosx_10_0_x86_64',
       'macosx_10_0_universal',
   ])
+  assert PEP425Extras.parse_macosx_tag('macosx_12_arm64') == (12, 0, "arm64")
+  assert PEP425Extras.parse_macosx_tag('macosx_12_x86_64') == (12, 0, "x86_64")
+  assert PEP425Extras.parse_macosx_tag('macosx_12_1_arm64') == (12, 1, "arm64")
+  assert PEP425Extras.parse_macosx_tag('macosx_12_1_x86_64') == (12, 1, "x86_64")
 
   with pytest.raises(ValueError):
     list(PEP425Extras.platform_iterator('macosx_10'))
 
   with pytest.raises(ValueError):
     list(PEP425Extras.platform_iterator('macosx_10_0'))
-
-  with pytest.raises(ValueError):
-    list(PEP425Extras.platform_iterator('macosx_9_x86_64'))
 
 
 def test_iter_supported_tags():
