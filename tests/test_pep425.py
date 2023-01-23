@@ -13,20 +13,31 @@ def test_platform_iterator():
   assert list(PEP425Extras.platform_iterator('linux_x86_64')) == ['linux_x86_64']
 
   # macosx
-  assert set(PEP425Extras.platform_iterator('macosx_10_4_x86_64')) == set([
-      'macosx_10_4_x86_64',
-      'macosx_10_3_x86_64',
-      'macosx_10_2_x86_64',
-      'macosx_10_1_x86_64',
-      'macosx_10_0_x86_64',
-  ])
+  
+  assert set(PEP425Extras.platform_iterator('macosx_10_6_x86_64')) == set(
+    [
+      'macosx_10_%s_%s' % (minor, arch) 
+        for minor in [4,5,6]
+        for arch in ["x86_64", "intel", "fat32", "universal", "universal2", "fat64"]
+    ]
+  )
   assert set(PEP425Extras.platform_iterator('macosx_10_0_universal')) == set([
-      'macosx_10_0_i386',
-      'macosx_10_0_ppc',
-      'macosx_10_0_ppc64',
-      'macosx_10_0_x86_64',
-      'macosx_10_0_universal',
+    'macosx_10_0_universal',
   ])
+
+  assert set(PEP425Extras.platform_iterator('macosx_13_2_arm64')) == set(
+    [
+      'macosx_%s_0_%s' % (major, arch)
+        for major in [13, 12, 11]
+        for arch in ["arm64", "universal2"]
+    ] 
+    + [
+      'macosx_10_%s_%s' % (minor, arch)
+        for minor in range(4, 17)
+        for arch in ["universal2"]
+    ]
+  )
+
   assert PEP425Extras.parse_macosx_tag('macosx_12_arm64') == (12, 0, "arm64")
   assert PEP425Extras.parse_macosx_tag('macosx_12_x86_64') == (12, 0, "x86_64")
   assert PEP425Extras.parse_macosx_tag('macosx_12_1_arm64') == (12, 1, "arm64")
