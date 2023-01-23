@@ -45,13 +45,94 @@ class PEP425Extras(object):
     return major, minor, platform
 
   @classmethod
+  # From https://github.com/pantsbuild/pex/blob/97a2497e0938ece709310a03e7e41b5c26992952/pex/vendor/_vendored/packaging_21_3/packaging/tags.py#L313:5
+  def _mac_binary_formats(cls, version_tuple, cpu_arch):
+    formats = [cpu_arch]
+    if cpu_arch == "x86_64":
+        if version_tuple < (10, 4):
+            return []
+        formats.extend(["intel", "fat64", "fat32"])
+
+    elif cpu_arch == "i386":
+        if version_tuple < (10, 4):
+            return []
+        formats.extend(["intel", "fat32", "fat"])
+
+    elif cpu_arch == "ppc64":
+        # TODO: Need to care about 32-bit PPC for ppc64 through 10.2?
+        if version_tuple > (10, 5) or version_tuple < (10, 4):
+            return []
+        formats.append("fat64")
+
+    elif cpu_arch == "ppc":
+        if version_tuple > (10, 6):
+            return []
+        formats.extend(["fat32", "fat"])
+
+    if cpu_arch in {"arm64", "x86_64"}:
+        formats.append("universal2")
+
+    if cpu_arch in {"x86_64", "i386", "ppc64", "ppc", "intel"}:
+        formats.append("universal")
+
+    return formats
+
+
+  @classmethod
   def iter_compatible_osx_platforms(cls, supported_platform):
-    platform_major, platform_minor, platform = cls.parse_macosx_tag(supported_platform)
-    platform_equivalents = set(Platform.MACOSX_PLATFORM_COMPATIBILITY.get(platform, ()))
-    platform_equivalents.add(platform)
-    for minor in range(platform_minor, -1, -1):
-      for binary_compat in platform_equivalents:
-        yield 'macosx_%s_%s_%s' % (platform_major, minor, binary_compat)
+    major, minor, arch = cls.parse_macosx_tag(supported_platform)
+    version = (major, minor)
+
+    # From https://github.com/pantsbuild/pex/blob/97a2497e0938ece709310a03e7e41b5c26992952/pex/vendor/_vendored/packaging_21_3/packaging/tags.py#L366-L414
+    if (10, 0) <= version and version < (11, 0):
+        # Prior to Mac OS 11, each yearly release of Mac OS bumped the
+        # "minor" version number.  The major version was always 10.
+        for minor_version in range(version[1], -1, -1):
+            compat_version = 10, minor_version
+            binary_formats = cls._mac_binary_formats(compat_version, arch)
+            for binary_format in binary_formats:
+                yield "macosx_{major}_{minor}_{binary_format}".format(
+                    major=10, minor=minor_version, binary_format=binary_format
+                )
+
+    if version >= (11, 0):
+        # Starting with Mac OS 11, each yearly release bumps the major version
+        # number.   The minor versions are now the midyear updates.
+        for major_version in range(version[0], 10, -1):
+            compat_version = major_version, 0
+            binary_formats = cls._mac_binary_formats(compat_version, arch)
+            for binary_format in binary_formats:
+                yield "macosx_{major}_{minor}_{binary_format}".format(
+                    major=major_version, minor=0, binary_format=binary_format
+                )
+
+    if version >= (11, 0):
+        # Mac OS 11 on x86_64 is compatible with binaries from previous releases.
+        # Arm64 support was introduced in 11.0, so no Arm binaries from previous
+        # releases exist.
+        #
+        # However, the "universal2" binary format can have a
+        # macOS version earlier than 11.0 when the x86_64 part of the binary supports
+        # that version of macOS.
+        if arch == "x86_64":
+            for minor_version in range(16, 3, -1):
+                compat_version = 10, minor_version
+                binary_formats = cls._mac_binary_formats(compat_version, arch)
+                for binary_format in binary_formats:
+                    yield "macosx_{major}_{minor}_{binary_format}".format(
+                        major=compat_version[0],
+                        minor=compat_version[1],
+                        binary_format=binary_format,
+                    )
+        else:
+            for minor_version in range(16, 3, -1):
+                compat_version = 10, minor_version
+                binary_format = "universal2"
+                yield "macosx_{major}_{minor}_{binary_format}".format(
+                    major=compat_version[0],
+                    minor=compat_version[1],
+                    binary_format=binary_format,
+                )
 
   @classmethod
   def platform_iterator(cls, platform):
