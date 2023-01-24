@@ -219,8 +219,7 @@ class WheelPackage(Package):
     for py in self._py_tag.split('.'):
       for abi in self._abi_tag.split('.'):
         for arch in self._arch_tag.split('.'):
-          for real_arch in PEP425Extras.platform_iterator(arch):
-            yield (py, abi, real_arch)
+          yield (py, abi, arch)
 
   def compatible(self, identity, platform=Platform.current()):
     for tag in PEP425.iter_supported_tags(identity, platform):
