@@ -5,6 +5,7 @@ from __future__ import absolute_import
 
 import logging
 import os
+import zipfile
 
 from pkg_resources import DefaultProvider, ZipProvider, get_provider
 
@@ -411,7 +412,7 @@ class PEXBuilder(object):
       self._precompile_source()
     self._frozen = True
 
-  def build(self, filename, bytecode_compile=True):
+  def build(self, filename, bytecode_compile=True, enable_compression=False):
     """Package the PEX into a zipfile.
 
     :param filename: The filename where the PEX should be stored.
@@ -433,7 +434,8 @@ class PEXBuilder(object):
     with open(filename + '~', 'ab') as pexfile:
       assert os.path.getsize(pexfile.name) == 0
       pexfile.write(to_bytes('%s\n' % self._shebang))
-    self._chroot.zip(filename + '~', mode='a')
+    compress_type = zipfile.ZIP_DEFLATED if enable_compression else zipfile.ZIP_STORED
+    self._chroot.zip(filename + '~', mode='a', compress_type=compress_type)
     if os.path.exists(filename):
       os.unlink(filename)
     os.rename(filename + '~', filename)
