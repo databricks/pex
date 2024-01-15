@@ -9,6 +9,7 @@ import errno
 import os
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 import threading
@@ -332,6 +333,18 @@ class Chroot(object):
     shutil.rmtree(self.chroot)
 
   def zip(self, filename, mode='wb'):
-    with contextlib.closing(zipfile.ZipFile(filename, mode)) as zf:
-      for f in sorted(self.files()):
-        zf.write(os.path.join(self.chroot, f), arcname=f, compress_type=zipfile.ZIP_DEFLATED)
+    if mode == 'a':
+      # cmd = ["zip", "-0", "-Ar", os.path.join(os.getcwd(), filename)] + sorted(self.files())
+
+      cmd = ["7z", "a", "-mx=1", "-tzip", os.path.join(os.getcwd(), filename + ".")] + sorted(self.files())
+      zip_process = subprocess.Popen(cmd, cwd=self.chroot, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+      (stdout, stderr) = zip_process.communicate()
+      print(stdout)
+      print(stderr)
+      exit_code = zip_process.wait()
+      if exit_code != 0:
+        raise Exception("Non-zero exit-code:%s\nSTDOUT:%s\nSTDERR:\n%s" % (exit_code, stdout, stderr))
+    else:
+      with contextlib.closing(zipfile.ZipFile(filename, mode)) as zf:
+        for f in sorted(self.files()):
+          zf.write(os.path.join(self.chroot, f), arcname=f, compress_type=zipfile.ZIP_DEFLATED)
