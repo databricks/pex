@@ -9,10 +9,14 @@ import errno
 import os
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 import threading
-import zipfile
+try:
+  import zipfile_isal as zipfile
+except ImportError:
+  import zipfile
 from collections import defaultdict
 from uuid import uuid4
 
@@ -334,4 +338,46 @@ class Chroot(object):
   def zip(self, filename, mode='wb'):
     with contextlib.closing(zipfile.ZipFile(filename, mode)) as zf:
       for f in sorted(self.files()):
-        zf.write(os.path.join(self.chroot, f), arcname=f, compress_type=zipfile.ZIP_DEFLATED)
+        zf.write(os.path.join(self.chroot, f), arcname=f, compress_type=zipfile.ZIP_STORED)
+
+  # def zip(self, filename, mode='wb'):
+  #   if mode == 'a':
+  #     # cmd = ["zip", "-0", "-Ar", os.path.join(os.getcwd(), filename)] + sorted(self.files())
+
+  #     # Write file paths to a temporary file
+  #     with tempfile.NamedTemporaryFile(mode='w+', delete=False) as temp_file:
+  #       temp_file.write('\n'.join(sorted(self.files())))
+  #       temp_file_path = temp_file.name
+
+  #     # cmd = ["7z", "a", "-mx=1", "-tzip", os.path.join(os.getcwd(), filename + "."), f"@{temp_file_path}"]
+  #     cmd = ["7z", "a", "-mx=1", "-tzip", filename, f"@{temp_file_path}"]
+  #     zip_process = subprocess.Popen(cmd, cwd=self.chroot, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+  #     (stdout, stderr) = zip_process.communicate()
+  #     print(stdout)
+  #     print(stderr)
+  #     exit_code = zip_process.wait()
+  #     if exit_code != 0:
+  #       raise Exception("Non-zero exit-code:%s\nSTDOUT:%s\nSTDERR:\n%s" % (exit_code, stdout, stderr))
+  #   else:
+  #     with contextlib.closing(zipfile.ZipFile(filename, mode)) as zf:
+  #       for f in sorted(self.files()):
+  #         zf.write(os.path.join(self.chroot, f), arcname=f, compress_type=zipfile.ZIP_DEFLATED)
+
+  # # def zip(self, filename, mode='wb'):
+  # #   file_list = sorted(self.files())
+  # #   file_paths = [os.path.join(self.chroot, f) for f in file_list]
+
+  # #   # Write file paths to a temporary file
+  # #   with tempfile.NamedTemporaryFile(mode='w+', delete=False) as temp_file:
+  # #       temp_file.write('\n'.join(file_paths))
+  # #       temp_file_path = temp_file.name
+
+  # #   # Create a command string for 7-Zip
+  # #   command = ["7z", "a", "-tzip", filename, f"@{temp_file_path}"]
+
+  # #   # Run the command
+  # #   try:
+  # #       subprocess.run(command, check=True)
+  # #   finally:
+  # #       # Remove the temporary file
+  # #       os.remove(temp_file_path)
