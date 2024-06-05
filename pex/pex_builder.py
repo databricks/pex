@@ -17,6 +17,29 @@ from .pex_info import PexInfo
 from .util import CacheHelper, DistributionHelper
 
 
+COLLECT_METRICS = b"""
+try:
+  import os
+  import sys
+  from __metric_client__ import MonitoringClient, Event
+  mclient = MonitoringClient.get_default()
+
+  mclient.record_event(
+    Event(
+      service = 'pex_usage',
+      tags = {
+        'py_version': '%d.%d' % (sys.version_info.major, sys.version_info.minor),
+        'platform': sys.platform,
+        'entrypoint': sys.argv[0],
+        'is_bazel_run': str('BUILD_WORKSPACE_DIRECTORY' in os.environ)
+      }
+    )
+  )
+except:
+  pass
+"""
+
+
 BOOTSTRAP_ENVIRONMENT = b"""
 import os
 import sys
@@ -327,6 +350,9 @@ class PEXBuilder(object):
             self._chroot.write(bytes(import_string, 'UTF-8'), sub_path)
           init_digest.add(sub_path)
 
+  def _prepare_metric_client(self):
+    self._chroot.copy(os.path.join(os.path.dirname(__file__), '__metric_client__.py'), '__metric_client__.py')
+
   def _precompile_source(self):
     source_relpaths = [path for label in ('source', 'executable', 'main', 'bootstrap')
                        for path in self._chroot.filesets.get(label, ()) if path.endswith('.py')]
@@ -340,7 +366,7 @@ class PEXBuilder(object):
     self._chroot.write(self._pex_info.dump().encode('utf-8'), PexInfo.PATH, label='manifest')
 
   def _prepare_main(self):
-    self._chroot.write(self._preamble + b'\n' + BOOTSTRAP_ENVIRONMENT,
+    self._chroot.write(self._preamble + b'\n' + COLLECT_METRICS + b'\n' + BOOTSTRAP_ENVIRONMENT,
         '__main__.py', label='main')
 
   def _copy_or_link(self, src, dst, label=None):
@@ -407,6 +433,7 @@ class PEXBuilder(object):
     self._prepare_manifest()
     self._prepare_bootstrap()
     self._prepare_main()
+    self._prepare_metric_client()
     if bytecode_compile:
       self._precompile_source()
     self._frozen = True
