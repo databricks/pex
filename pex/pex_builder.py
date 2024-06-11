@@ -24,6 +24,17 @@ try:
   from __metric_client__ import MonitoringClient, Event
   mclient = MonitoringClient.get_default()
 
+  __temp_entry_point__ = None
+  if '__file__' in locals() and __file__ is not None:
+    __temp_entry_point__ = os.path.dirname(__file__)
+  elif '__loader__' in locals():
+    from zipimport import zipimporter
+    from pkgutil import ImpLoader
+    if hasattr(__loader__, 'archive'):
+      __temp_entry_point__ = __loader__.archive
+    elif isinstance(__loader__, ImpLoader):
+      __temp_entry_point__ = os.path.dirname(__loader__.get_filename())
+
   mclient.record_event(
     Event(
       service = 'pex_usage',
@@ -31,7 +42,8 @@ try:
         'py_version': '%d.%d' % (sys.version_info.major, sys.version_info.minor),
         'platform': sys.platform,
         'entrypoint': sys.argv[0],
-        'is_bazel_run': str('BUILD_WORKSPACE_DIRECTORY' in os.environ)
+        'is_bazel_run': str('BUILD_WORKSPACE_DIRECTORY' in os.environ),
+        'entrypoint_actual': __temp_entry_point__
       }
     )
   )
