@@ -17,41 +17,6 @@ from .pex_info import PexInfo
 from .util import CacheHelper, DistributionHelper
 
 
-COLLECT_METRICS = b"""
-try:
-  import os
-  import sys
-  from __metric_client__ import MonitoringClient, Event
-  mclient = MonitoringClient.get_default()
-
-  __temp_entry_point__ = None
-  if '__file__' in locals() and __file__ is not None:
-    __temp_entry_point__ = os.path.dirname(__file__)
-  elif '__loader__' in locals():
-    from zipimport import zipimporter
-    from pkgutil import ImpLoader
-    if hasattr(__loader__, 'archive'):
-      __temp_entry_point__ = __loader__.archive
-    elif isinstance(__loader__, ImpLoader):
-      __temp_entry_point__ = os.path.dirname(__loader__.get_filename())
-
-  mclient.record_event(
-    Event(
-      service = 'pex_usage',
-      tags = {
-        'py_version': '%d.%d' % (sys.version_info.major, sys.version_info.minor),
-        'platform': sys.platform,
-        'entrypoint': sys.argv[0],
-        'is_bazel_run': str('BUILD_WORKSPACE_DIRECTORY' in os.environ),
-        'entrypoint_actual': __temp_entry_point__
-      }
-    )
-  )
-except:
-  pass
-"""
-
-
 BOOTSTRAP_ENVIRONMENT = b"""
 import os
 import sys
@@ -66,6 +31,25 @@ elif '__loader__' in locals():
     __entry_point__ = __loader__.archive
   elif isinstance(__loader__, ImpLoader):
     __entry_point__ = os.path.dirname(__loader__.get_filename())
+
+try:
+  from __metric_client__ import MonitoringClient, Event
+  mclient = MonitoringClient.get_default()
+
+  mclient.record_event(
+    Event(
+      service = 'pex_usage',
+      tags = {
+        'py_version': '%d.%d' % (sys.version_info.major, sys.version_info.minor),
+        'platform': sys.platform,
+        'entrypoint': sys.argv[0],
+        'is_bazel_run': str('BUILD_WORKSPACE_DIRECTORY' in os.environ),
+        'entrypoint_actual': __entry_point__
+      }
+    )
+  )
+except:
+  pass
 
 if __entry_point__ is None:
   sys.stderr.write('Could not launch python executable!\\n')
@@ -378,7 +362,7 @@ class PEXBuilder(object):
     self._chroot.write(self._pex_info.dump().encode('utf-8'), PexInfo.PATH, label='manifest')
 
   def _prepare_main(self):
-    self._chroot.write(self._preamble + b'\n' + COLLECT_METRICS + b'\n' + BOOTSTRAP_ENVIRONMENT,
+    self._chroot.write(self._preamble + b'\n' + BOOTSTRAP_ENVIRONMENT,
         '__main__.py', label='main')
 
   def _copy_or_link(self, src, dst, label=None):
