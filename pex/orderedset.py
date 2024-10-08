@@ -11,7 +11,7 @@
 import collections
 
 
-class OrderedSet(collections.MutableSet):
+class OrderedSet(collections.abc.MutableSet):
   KEY, PREV, NEXT = range(3)
 
   def __init__(self, iterable=None):
