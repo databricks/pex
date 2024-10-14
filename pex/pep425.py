@@ -202,9 +202,8 @@ class PEP425(object):  # noqa
 
     major_version = int(version[0])
     minor_versions = []
-    for minor in range(int(version[1]), -1, -1):
+    for minor in range(int(version[1:]), -1, -1):
       minor_versions.append('%d%d' % (major_version, minor))
-
     platforms = list(PEP425Extras.platform_iterator(cls.translate_platform_to_tag(platform)))
 
     # interpreter specific

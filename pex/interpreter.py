@@ -182,7 +182,7 @@ class PythonInterpreter(object):
     # NB: OSX ships python binaries named Python so we allow for capital-P.
     re.compile(r'[Pp]ython$'),
 
-    re.compile(r'python[23].[0-9]$'),
+    re.compile(r'python[23]\.[0-9]{1,2}$'),
     re.compile(r'pypy$'),
     re.compile(r'pypy-1.[0-9]$'),
   )
